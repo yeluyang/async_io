@@ -1,7 +1,5 @@
 package async_io
 
-import "fmt"
-
 type AsyncReadJob struct {
 	path      string
 	batch     int
@@ -23,65 +21,88 @@ func (j *AsyncReadJob) WithDelimiter(delim byte) *AsyncReadJob { j.delimiter = d
 func (j *AsyncReadJob) WithSize(size int) *AsyncReadJob        { j.size = size; return j }
 func (j *AsyncReadJob) WithBatch(batch int) *AsyncReadJob      { j.batch = batch; return j }
 
+func (j *AsyncReadJob) Close() {
+	close(j.exit)
+}
+
 func (j *AsyncReadJob) Run() chan [][]byte {
 	ch := make(chan [][]byte, 1)
 	go func() {
 		defer close(ch)
-		if j.size <= 0 {
-			j.ReadOnce(0, ch)
-		} else {
-			remain := j.size
-			for remain != 0 {
-				count := j.ReadOnce(remain, ch)
-				remain -= count
-				if remain < 0 {
-					panic(fmt.Sprintf("size remain underflow: size=%d, read=%d, remain=%d", j.size, count, remain))
-				}
+		buffer := make([][]byte, 0, j.batch)
+		c := j.read()
+		for data := range c {
+			buffer = append(buffer, data)
+			if len(buffer) >= j.batch {
+				ch <- buffer
+				buffer = make([][]byte, 0, j.batch)
 			}
+		}
+		if len(buffer) > 0 {
+			ch <- buffer
 		}
 	}()
 	return ch
 }
 
-func (j *AsyncReadJob) Close() {
-	close(j.exit)
-}
-
-func (j *AsyncReadJob) ReadOnce(size int, ch chan [][]byte) int {
-	buffer := make([][]byte, 0, j.batch)
-	inner := newAsyncIO(j.path, true)
-	fileCH := inner.runReader(j.delimiter)
-	count := 0
-	defer func() {
-		inner.close()
-		<-fileCH
-	}()
-	for {
-		select {
-		case <-j.exit:
-			return count
-		case data, open := <-fileCH:
-			if open {
-				buffer = append(buffer, data)
-				count++
-				if size > 0 && count >= size {
-					if count > size {
-						panic(fmt.Sprintf("read(%d) over limit(%d)", count, size))
-					}
-					ch <- buffer
-					return count
-				} else if len(buffer) >= j.batch {
-					ch <- buffer
-					buffer = make([][]byte, 0, j.batch)
-				}
-			} else {
-				if len(buffer) > 0 {
-					ch <- buffer
-				}
-				return count
+func (j *AsyncReadJob) RunWithFunc(fn func([]byte) interface{}) chan []interface{} {
+	ch := make(chan []interface{}, 1)
+	go func() {
+		defer close(ch)
+		buffer := make([]interface{}, 0, j.batch)
+		c := j.read()
+		for data := range c {
+			v := fn(data)
+			buffer = append(buffer, v)
+			if len(buffer) >= j.batch {
+				ch <- buffer
+				buffer = make([]interface{}, 0, j.batch)
 			}
 		}
-	}
+		if len(buffer) > 0 {
+			ch <- buffer
+		}
+	}()
+	return ch
+}
+
+func (j *AsyncReadJob) read() chan []byte {
+	ch := make(chan []byte, 1)
+	go func() {
+		defer close(ch)
+		remain := j.size
+		for {
+			func() {
+				inner := newAsyncIO(j.path, true)
+				fileCH := inner.runReader(j.delimiter)
+				defer func() {
+					inner.close()
+					<-fileCH
+				}()
+				for {
+					select {
+					case <-j.exit:
+						return
+					case data, open := <-fileCH:
+						if !open {
+							return
+						}
+						ch <- data
+						if j.size > 0 {
+							remain--
+							if remain == 0 {
+								return
+							}
+						}
+					}
+				}
+			}()
+			if remain <= 0 {
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 type AsyncWriteJob struct {
