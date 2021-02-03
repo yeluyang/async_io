@@ -42,7 +42,7 @@ func (f *asyncIO) runReader(delim byte) chan []byte {
 		defer close(ch)
 		fd, err := f.open()
 		if err != nil {
-			log.Fatalf("failed to read from %s: %s", fd.Name(), err)
+			log.Fatalf("failed to read from %s: %s", f.path, err)
 		}
 		defer fd.Close()
 		r := bufio.NewReader(fd)
@@ -60,7 +60,7 @@ func (f *asyncIO) runReader(delim byte) chan []byte {
 						log.Fatalf("failed to read from %s: %s", fd.Name(), err)
 					}
 				} else {
-					// TODO log.Tracef("read data={len=%d, offset=%d} from %s", len(data), counter, f.inner.Name())
+					log.Tracef("read data={len=%d, offset=%d} from %s", len(data), counter, fd.Name())
 					counter++
 					ch <- data[:len(data)-1] // remove `delimiter` at the end of bytes
 				}
@@ -89,9 +89,11 @@ func (f *asyncIO) runWriter(ch chan []byte) {
 		}()
 		for bytes := range ch {
 			if n, err := w.Write(bytes); err != nil {
-				log.Fatalf("failed to write into %s: %s", f.path, err)
+				log.Fatalf("failed to write into %s: %s", fd.Name(), err)
 			} else if n != len(bytes) {
-				log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", f.path, n, len(bytes))
+				log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", fd.Name(), n, len(bytes))
+			} else {
+				log.Tracef("write %d bytes into %s", n, fd.Name())
 			}
 		}
 	}()

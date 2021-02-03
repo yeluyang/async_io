@@ -1,16 +1,16 @@
 package async_io
 
 type AsyncReadJob struct {
-	path      string
+	paths     []string
 	batch     int
 	size      int
 	delimiter byte
 	exit      chan struct{}
 }
 
-func NewAsyncReadJob(path string) *AsyncReadJob {
+func NewAsyncReadJob(paths ...string) *AsyncReadJob {
 	return &AsyncReadJob{
-		path:      path,
+		paths:     paths,
 		batch:     1,
 		size:      0,
 		delimiter: DefaultDelimiter,
@@ -30,8 +30,7 @@ func (j *AsyncReadJob) Run() chan [][]byte {
 	go func() {
 		defer close(ch)
 		buffer := make([][]byte, 0, j.batch)
-		c := j.read()
-		for data := range c {
+		for data := range j.read() {
 			buffer = append(buffer, data)
 			if len(buffer) >= j.batch {
 				ch <- buffer
@@ -50,8 +49,7 @@ func (j *AsyncReadJob) RunWithFunc(fn func([]byte) interface{}) chan []interface
 	go func() {
 		defer close(ch)
 		buffer := make([]interface{}, 0, j.batch)
-		c := j.read()
-		for data := range c {
+		for data := range j.read() {
 			v := fn(data)
 			buffer = append(buffer, v)
 			if len(buffer) >= j.batch {
@@ -72,31 +70,34 @@ func (j *AsyncReadJob) read() chan []byte {
 		defer close(ch)
 		remain := j.size
 		for {
-			func() {
-				inner := newAsyncIO(j.path, true)
-				fileCH := inner.runReader(j.delimiter)
-				defer func() {
-					inner.close()
-					<-fileCH
-				}()
-				for {
-					select {
-					case <-j.exit:
-						return
-					case data, open := <-fileCH:
-						if !open {
-							return
+			for i := range j.paths {
+				func(file string) {
+					inner := newAsyncIO(file, true)
+					fileCH := inner.runReader(j.delimiter)
+					defer func() {
+						inner.close()
+						for range fileCH {
 						}
-						ch <- data
-						if j.size > 0 {
-							remain--
-							if remain == 0 {
+					}()
+					for {
+						select {
+						case <-j.exit:
+							return
+						case data, open := <-fileCH:
+							if !open {
 								return
+							}
+							ch <- data
+							if j.size > 0 {
+								remain--
+								if remain == 0 {
+									return
+								}
 							}
 						}
 					}
-				}
-			}()
+				}(j.paths[i])
+			}
 			if remain <= 0 {
 				return
 			}
