@@ -27,7 +27,7 @@ func (f *asyncIO) open() (*os.File, error) {
 	perm := os.FileMode(0444)
 	if !f.readOnly {
 		flag = os.O_APPEND | os.O_CREATE | os.O_RDWR
-		perm = 0644
+		perm = os.FileMode(0644)
 	}
 	fd, err := os.OpenFile(f.path, flag, perm)
 	if err != nil {
@@ -87,13 +87,18 @@ func (f *asyncIO) runWriter(ch chan []byte) {
 				log.Fatalf("failed to flush bytes: %s", err)
 			}
 		}()
-		for bytes := range ch {
-			if n, err := w.Write(bytes); err != nil {
-				log.Fatalf("failed to write into %s: %s", fd.Name(), err)
-			} else if n != len(bytes) {
-				log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", fd.Name(), n, len(bytes))
-			} else {
-				log.Tracef("write %d bytes into %s", n, fd.Name())
+		for {
+			select {
+			case <-f.exit:
+				return
+			case bytes := <-ch:
+				if n, err := w.Write(bytes); err != nil {
+					log.Fatalf("failed to write into %s: %s", fd.Name(), err)
+				} else if n != len(bytes) {
+					log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", fd.Name(), n, len(bytes))
+				} else {
+					log.Tracef("write %d bytes into %s", n, fd.Name())
+				}
 			}
 		}
 	}()
