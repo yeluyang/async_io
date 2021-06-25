@@ -3,64 +3,100 @@ package async_io
 import (
 	"bufio"
 	"io"
-	"os"
 
 	log "github.com/sirupsen/logrus"
 )
 
-type asyncIO struct {
-	path     string
-	readOnly bool
-	exit     chan struct{}
+type asyncWriter struct {
+	name  string
+	inner io.Writer
+	exit  chan struct{}
 }
 
-func newAsyncIO(file string, readOnly bool) *asyncIO {
-	return &asyncIO{
-		path:     file,
-		readOnly: readOnly,
-		exit:     make(chan struct{}),
+func newAsyncWriter(name string, writer io.Writer) *asyncWriter {
+	return &asyncWriter{
+		name:  name,
+		inner: writer,
+		exit:  make(chan struct{}),
 	}
 }
 
-func (f *asyncIO) open() (*os.File, error) {
-	flag := os.O_RDONLY
-	perm := os.FileMode(0444)
-	if !f.readOnly {
-		flag = os.O_APPEND | os.O_CREATE | os.O_RDWR
-		perm = os.FileMode(0644)
-	}
-	fd, err := os.OpenFile(f.path, flag, perm)
-	if err != nil {
-		return nil, err
-	}
-	return fd, nil
+func (w *asyncWriter) close() {
+	close(w.exit)
 }
 
-func (f *asyncIO) runReader(delim byte) chan []byte {
-	ch := make(chan []byte, 1)
+func (w *asyncWriter) runWriter(ch chan []byte) {
 	go func() {
-		defer close(ch)
-		fd, err := f.open()
-		if err != nil {
-			log.Fatalf("failed to read from %s: %s", f.path, err)
-		}
-		defer fd.Close()
-		r := bufio.NewReader(fd)
+		wtr := bufio.NewWriter(w.inner)
+		defer func() {
+			if err := wtr.Flush(); err != nil {
+				log.Fatalf("failed to flush bytes: %s", err)
+			}
+		}()
 		counter := 0
 		for {
 			select {
-			case <-f.exit:
+			case <-w.exit:
+				log.Debugf("received exit signal, already write %d bytes", counter)
+				return
+			case bytes, ok := <-ch:
+				if !ok {
+					log.Debugf("all bytes have been wrote, total %d bytes", counter)
+					return
+				}
+				if n, err := wtr.Write(bytes); err != nil {
+					log.Fatalf("failed to write into %s: %s", w.name, err)
+				} else if n != len(bytes) {
+					log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", w.name, n, len(bytes))
+				} else {
+					counter += n
+					log.Tracef("write %d bytes into %s", n, w.name)
+				}
+			}
+		}
+	}()
+}
+
+type asyncReader struct {
+	name  string
+	inner io.Reader
+	delim byte
+	exit  chan struct{}
+}
+
+func newAsyncReader(name string, reader io.Reader, delim byte) *asyncReader {
+	return &asyncReader{
+		name:  name,
+		inner: reader,
+		delim: delim,
+		exit:  make(chan struct{}),
+	}
+}
+
+func (r *asyncReader) close() {
+	close(r.exit)
+}
+
+func (r *asyncReader) runReader() chan []byte {
+	ch := make(chan []byte, 1)
+	go func() {
+		defer close(ch)
+		counter := 0
+		rdr := bufio.NewReader(r.inner)
+		for {
+			select {
+			case <-r.exit:
 				return
 			default:
-				if data, err := r.ReadBytes(delim); err != nil {
+				if data, err := rdr.ReadBytes(r.delim); err != nil {
 					if err == io.EOF {
-						log.Debugf("read %d items from %s", counter, fd.Name())
+						log.Debugf("read %d items from %s", counter, r.name)
 						return
 					} else {
-						log.Fatalf("failed to read from %s: %s", fd.Name(), err)
+						log.Fatalf("failed to read from %s: %s", r.name, err)
 					}
 				} else {
-					log.Tracef("read data={len=%d, offset=%d} from %s", len(data), counter, fd.Name())
+					log.Tracef("read data={len=%d, offset=%d} from %s", len(data), counter, r.name)
 					counter++
 					ch <- data[:len(data)-1] // remove `delimiter` at the end of bytes
 				}
@@ -68,42 +104,4 @@ func (f *asyncIO) runReader(delim byte) chan []byte {
 		}
 	}()
 	return ch
-}
-
-func (f *asyncIO) runWriter(ch chan []byte) {
-	go func() {
-		fd, err := f.open()
-		if err != nil {
-			log.Fatalf("failed to read from %s: %s", f.path, err)
-		}
-		defer func() {
-			if err := fd.Close(); err != nil {
-				log.Fatalf("failed to close file: %s", f.path)
-			}
-		}()
-		w := bufio.NewWriter(fd)
-		defer func() {
-			if err := w.Flush(); err != nil {
-				log.Fatalf("failed to flush bytes: %s", err)
-			}
-		}()
-		for {
-			select {
-			case <-f.exit:
-				return
-			case bytes := <-ch:
-				if n, err := w.Write(bytes); err != nil {
-					log.Fatalf("failed to write into %s: %s", fd.Name(), err)
-				} else if n != len(bytes) {
-					log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", fd.Name(), n, len(bytes))
-				} else {
-					log.Tracef("write %d bytes into %s", n, fd.Name())
-				}
-			}
-		}
-	}()
-}
-
-func (f *asyncIO) close() {
-	close(f.exit)
 }
