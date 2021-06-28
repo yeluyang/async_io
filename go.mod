@@ -1,4 +1,4 @@
-module github.com/yeluyang/async_io_go
+module github.com/yeluyang/asyncio-go
 
 go 1.14
 

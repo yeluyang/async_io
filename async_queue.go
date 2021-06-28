@@ -1,4 +1,4 @@
-package async_io
+package asyncio
 
 type AsyncReadJob struct {
 	paths     []string
@@ -49,7 +49,7 @@ func (j *AsyncReadJob) Reader() chan []byte {
 		for {
 			for i := range j.paths {
 				func(file string) {
-					inner := newAsyncIO(file, true)
+					inner := newAsyncReader(file, true)
 					fileCH := inner.runReader(j.delimiter)
 					defer func() {
 						inner.close()

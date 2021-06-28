@@ -1,4 +1,4 @@
-package async_io
+package asyncio
 
 import (
 	"bufio"
