@@ -1,112 +1,76 @@
 package asyncio
 
-type AsyncReadJob struct {
-	paths     []string
-	size      int
-	delimiter byte
-	exit      chan struct{}
+type ReadQueue struct {
+	rdrs []*AsyncReader
+	exit chan struct{}
 }
 
-func NewAsyncReadJob(paths ...string) *AsyncReadJob {
-	return &AsyncReadJob{
-		paths:     paths,
-		size:      0,
-		delimiter: DefaultDelimiter,
-		exit:      make(chan struct{}),
+func NewReadQueue() *ReadQueue {
+	return &ReadQueue{
+		exit: make(chan struct{}),
 	}
 }
-func (j *AsyncReadJob) WithDelimiter(delim byte) *AsyncReadJob { j.delimiter = delim; return j }
-func (j *AsyncReadJob) WithSize(size int) *AsyncReadJob        { j.size = size; return j }
 
-func (j *AsyncReadJob) Close() {
+func (j *ReadQueue) Add(reader ...*AsyncReader) *ReadQueue {
+	j.rdrs = append(j.rdrs, reader...)
+	return j
+}
+
+func (j *ReadQueue) Close() {
+	for i := range j.rdrs {
+		j.rdrs[i].Close()
+	}
 	close(j.exit)
 }
 
-func (j *AsyncReadJob) BatchReader(batch int) chan [][]byte {
-	ch := make(chan [][]byte, 1)
-	go func() {
-		defer close(ch)
-		buffer := make([][]byte, 0, batch)
-		for data := range j.Reader() {
-			buffer = append(buffer, data)
-			if len(buffer) >= batch {
-				ch <- buffer
-				buffer = make([][]byte, 0, batch)
-			}
-		}
-		if len(buffer) > 0 {
-			ch <- buffer
-		}
-	}()
-	return ch
-}
-
-func (j *AsyncReadJob) Reader() chan []byte {
+func (j *ReadQueue) Reader() chan []byte {
 	ch := make(chan []byte, 1)
 	go func() {
 		defer close(ch)
-		remain := j.size
-		for {
-			for i := range j.paths {
-				func(file string) {
-					inner := newAsyncReader(file, true)
-					fileCH := inner.runReader(j.delimiter)
-					defer func() {
-						inner.close()
-						for range fileCH {
-						}
-					}()
-					for {
-						select {
-						case <-j.exit:
+		for i := range j.rdrs {
+			func(r *AsyncReader) {
+				defer r.Close()
+				for {
+					select {
+					case <-j.exit:
+						return
+					case data, open := <-r.C:
+						if !open {
 							return
-						case data, open := <-fileCH:
-							if !open {
-								return
-							}
-							ch <- data
-							if j.size > 0 {
-								remain--
-								if remain == 0 {
-									return
-								}
-							}
 						}
+						ch <- data
 					}
-				}(j.paths[i])
-			}
-			if remain <= 0 {
-				return
-			}
+				}
+			}(j.rdrs[i])
 		}
 	}()
 	return ch
 }
 
-type AsyncWriteJob struct {
+type WriteQueue struct {
 	path      string
 	delimiter byte
 	size      int
 	exit      chan struct{}
 }
 
-func NewAsyncWriteJob(path string) *AsyncWriteJob {
-	return &AsyncWriteJob{
+func NewWriteQueue(path string) *WriteQueue {
+	return &WriteQueue{
 		path:      path,
 		delimiter: DefaultDelimiter,
 		size:      1024,
 		exit:      make(chan struct{}),
 	}
 }
-func (j *AsyncWriteJob) WithDelimiter(delim byte) *AsyncWriteJob { j.delimiter = delim; return j }
-func (j *AsyncWriteJob) WithItemSize(size int) *AsyncWriteJob    { j.size = size; return j }
+func (j *WriteQueue) WithDelimiter(delim byte) *WriteQueue { j.delimiter = delim; return j }
+func (j *WriteQueue) WithItemSize(size int) *WriteQueue    { j.size = size; return j }
 
-func (j *AsyncWriteJob) BatchWrite(batch int, ch chan []byte) {
+func (j *WriteQueue) BatchWrite(batch int, ch chan []byte) {
 	buffer := make([]byte, batch*j.size)
 	counter := 0
 
 	put := make(chan []byte, 1)
-	inner := newAsyncIO(j.path, false)
+	inner := NewAsyncWriter(j.path, false)
 	defer inner.close()
 	inner.runWriter(put)
 
@@ -136,6 +100,6 @@ EXIT:
 	}
 }
 
-func (j *AsyncWriteJob) Close() {
+func (j *WriteQueue) Close() {
 	close(j.exit)
 }
