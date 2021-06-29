@@ -21,9 +21,12 @@ type AsyncReader struct {
 func NewAsyncReader(reader io.Reader) *AsyncReader {
 	r := &AsyncReader{
 		Delimiter: DefaultDelimiter,
-		inner:     bufio.NewReader(reader),
-		exit:      make(chan struct{}),
-		log:       log.StandardLogger(),
+
+		C: make(chan []byte, DefaultCHBuffer),
+
+		inner: bufio.NewReader(reader),
+		exit:  make(chan struct{}),
+		log:   log.StandardLogger(),
 	}
 	return r
 }

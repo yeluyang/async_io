@@ -18,6 +18,8 @@ type AsyncWriter struct {
 
 func NewAsyncWriter(writer io.Writer) *AsyncWriter {
 	w := &AsyncWriter{
+		C: make(chan []byte, DefaultCHBuffer),
+
 		inner: bufio.NewWriter(writer),
 		log:   log.StandardLogger(),
 	}
