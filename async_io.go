@@ -22,6 +22,8 @@ func NewAsyncWriter(name string, writer io.Writer) *AsyncWriter {
 	return w
 }
 
+func (w *AsyncWriter) WithName(name string) *AsyncWriter { w.name = name; return w }
+
 func (w *AsyncWriter) Close() {
 	close(w.C)
 }
