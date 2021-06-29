@@ -8,63 +8,45 @@ import (
 )
 
 type AsyncWriter struct {
-	name      string
-	inner     io.Writer
-	delimiter byte
-	C         chan []byte
-	exit      chan struct{}
+	name  string
+	inner *bufio.Writer
+	C     chan []byte
 }
 
 func NewAsyncWriter(name string, writer io.Writer) *AsyncWriter {
 	w := &AsyncWriter{
 		name:  name,
-		inner: writer,
-		exit:  make(chan struct{}),
+		inner: bufio.NewWriter(writer),
 	}
 	go w.run()
 	return w
 }
 
-func (w *AsyncWriter) close() {
-	close(w.exit)
+func (w *AsyncWriter) Close() {
+	close(w.C)
 }
 
 func (w *AsyncWriter) run() {
-	wtr := bufio.NewWriter(w.inner)
-	defer func() {
-		if err := wtr.Flush(); err != nil {
-			log.Fatalf("failed to flush bytes: %s", err)
-		}
-	}()
 	counter := 0
-	for {
-		select {
-		case <-w.exit:
-			log.Debugf("received exit signal, already write %d bytes", counter)
-			return
-		case bytes, ok := <-w.C:
-			if !ok {
-				log.Debugf("all bytes have been wrote, total %d bytes", counter)
-				return
-			}
-			if n, err := wtr.Write(bytes); err != nil {
-				log.Fatalf("failed to write into %s: %s", w.name, err)
-			} else if n != len(bytes) {
-				log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", w.name, n, len(bytes))
-			} else {
-				counter += n
-				log.Tracef("write %d bytes into %s", n, w.name)
-			}
+	for bs := range w.C {
+		if n, err := w.inner.Write(bs); err != nil {
+			log.Fatalf("failed to write into %s: %s", w.name, err)
+		} else if n != len(bs) {
+			log.Fatalf("failed to write into %s: incompelete write, bytes written(%d/%d)", w.name, n, len(bs))
+		} else {
+			log.Tracef("write %d bytes into %s", n, w.name)
+			counter += n
 		}
 	}
-}
-
-func (w *AsyncWriter) write() {
+	if err := w.inner.Flush(); err != nil {
+		log.Fatalf("failed to flush bytes: %s", err)
+	}
+	log.Debugf("write %d total bytes into %s", counter, w.name)
 }
 
 type AsyncReader struct {
 	name      string
-	inner     io.Reader
+	inner     *bufio.Reader
 	delimiter byte
 	exit      chan struct{}
 	C         chan []byte
@@ -72,7 +54,7 @@ type AsyncReader struct {
 
 func NewAsyncReader(reader io.Reader) *AsyncReader {
 	r := &AsyncReader{
-		inner:     reader,
+		inner:     bufio.NewReader(reader),
 		delimiter: DefaultDelimiter,
 		exit:      make(chan struct{}),
 	}
@@ -92,15 +74,14 @@ func (r *AsyncReader) Close() {
 func (r *AsyncReader) run() {
 	defer close(r.C)
 	counter := 0
-	rdr := bufio.NewReader(r.inner)
 	for {
 		select {
 		case <-r.exit:
 			return
 		default:
-			if data, err := rdr.ReadBytes(r.delimiter); err != nil {
+			if data, err := r.inner.ReadBytes(r.delimiter); err != nil {
 				if err == io.EOF {
-					log.Debugf("read %d items from %s", counter, r.name)
+					log.Debugf("read %d total items from %s", counter, r.name)
 					return
 				} else {
 					log.Fatalf("failed to read from %s: %s", r.name, err)
