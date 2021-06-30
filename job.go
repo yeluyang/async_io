@@ -1,22 +1,23 @@
 package asyncio
 
 type AsyncReadJob struct {
-	paths     []string
-	size      int
-	delimiter byte
-	exit      chan struct{}
+	queues []*ReadQueue
+	size   int
+	exit   chan struct{}
 }
 
-func NewAsyncReadJob(paths ...string) *AsyncReadJob {
+func NewAsyncReadJob() *AsyncReadJob {
 	return &AsyncReadJob{
-		paths:     paths,
-		size:      0,
-		delimiter: DefaultDelimiter,
-		exit:      make(chan struct{}),
+		size: 0,
+		exit: make(chan struct{}),
 	}
 }
-func (j *AsyncReadJob) WithDelimiter(delim byte) *AsyncReadJob { j.delimiter = delim; return j }
-func (j *AsyncReadJob) WithSize(size int) *AsyncReadJob        { j.size = size; return j }
+
+func (j *AsyncReadJob) WithSize(size int) *AsyncReadJob { j.size = size; return j }
+
+func (j *AsyncReadJob) Add(q ...*ReadQueue) {
+	j.queues = append(j.queues, q...)
+}
 
 func (j *AsyncReadJob) Close() {
 	close(j.exit)
@@ -47,33 +48,31 @@ func (j *AsyncReadJob) Reader() chan []byte {
 		defer close(ch)
 		remain := j.size
 		for {
-			for i := range j.paths {
-				func(file string) {
-					inner := newAsyncReader(file, true)
-					fileCH := inner.runReader(j.delimiter)
-					defer func() {
-						inner.close()
-						for range fileCH {
-						}
-					}()
+			for i := range j.queues {
+				func(q *ReadQueue) {
+					go q.Run()
+					defer q.Close()
 					for {
 						select {
 						case <-j.exit:
 							return
-						case data, open := <-fileCH:
+						case data, open := <-q.C:
 							if !open {
 								return
 							}
 							ch <- data
 							if j.size > 0 {
 								remain--
-								if remain == 0 {
+								if remain <= 0 {
 									return
 								}
 							}
 						}
 					}
-				}(j.paths[i])
+				}(j.queues[i])
+				if j.size > 0 && remain <= 0 {
+					return
+				}
 			}
 			if remain <= 0 {
 				return
