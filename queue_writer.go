@@ -1,26 +1,34 @@
 package asyncio
 
-import "io"
+import (
+	"fmt"
+)
 
 type WriteQueue struct {
 	PartSize int
 
-	C chan []byte
+	C chan [][]byte
+
+	writerBuilder func() *AsyncWriter
 }
 
-func NewWriteQueue(partitionSize int) *WriteQueue {
+func NewWriteQueue() *WriteQueue {
 	return &WriteQueue{
-		PartSize: partitionSize,
+		PartSize: 0,
 
-		C: make(chan []byte, DefaultCHBuffer),
+		C: make(chan [][]byte, DefaultCHBuffer),
 	}
 }
 
 func (q *WriteQueue) WithPartitionSize(size int) *WriteQueue { q.PartSize = size; return q }
+func (q *WriteQueue) WithWriterBuilder(builder func() *AsyncWriter) *WriteQueue {
+	q.writerBuilder = builder
+	return q
+}
 
-func (q *WriteQueue) Run(writerBuilder func() io.Writer) {
-	for func() (notDone bool) {
-		wtr := NewAsyncWriter(writerBuilder())
+func (q *WriteQueue) Run() {
+	for func() (needNewPart bool) {
+		wtr := q.writerBuilder()
 		wtr.Run()
 		defer wtr.Close()
 
@@ -28,8 +36,12 @@ func (q *WriteQueue) Run(writerBuilder func() io.Writer) {
 		for bs := range q.C {
 			wtr.C <- bs
 			counter++
-			if counter == q.PartSize {
-				return true
+			if q.PartSize > 0 {
+				if counter == q.PartSize {
+					return true
+				} else if counter > q.PartSize {
+					panic(fmt.Errorf("internal error: write item over size of partittion"))
+				}
 			}
 		}
 		return false
