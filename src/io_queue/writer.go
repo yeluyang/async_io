@@ -1,8 +1,8 @@
-package queueio
+package ioque
 
 import (
 	"fmt"
-	asyncio "iomaster/pkg/async_io"
+	asyncio "iomaster/src/async_io"
 )
 
 type WriterQueue struct {

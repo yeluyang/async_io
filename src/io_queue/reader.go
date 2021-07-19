@@ -1,7 +1,7 @@
-package queueio
+package ioque
 
 import (
-	asyncio "iomaster/pkg/async_io"
+	asyncio "iomaster/src/async_io"
 )
 
 type ReaderQueue struct {

@@ -1,12 +1,12 @@
-package iomaster
+package iojob
 
 import (
-	asyncio "iomaster/pkg/async_io"
-	queueio "iomaster/pkg/queue_io"
+	asyncio "iomaster/src/async_io"
+	ioque "iomaster/src/io_queue"
 )
 
 type ReadJob struct {
-	queues map[string]*queueio.ReaderQueue
+	queues map[string]*ioque.ReaderQueue
 	size   int
 	exit   chan struct{}
 }
@@ -22,7 +22,7 @@ func (j *ReadJob) WithSize(size int) *ReadJob { j.size = size; return j }
 
 func (j *ReadJob) Queue(queName string, reader ...*asyncio.AsyncReader) *ReadJob {
 	if _, ok := j.queues[queName]; !ok {
-		j.queues[queName] = queueio.NewReadQueue()
+		j.queues[queName] = ioque.NewReadQueue()
 	}
 	j.queues[queName].Queue(reader...)
 	return j
@@ -58,7 +58,7 @@ func (j *ReadJob) CH() chan []byte {
 		remain := j.size
 		for {
 			for i := range j.queues {
-				func(q *queueio.ReaderQueue) {
+				func(q *ioque.ReaderQueue) {
 					go q.Run()
 					defer q.Close()
 					for {

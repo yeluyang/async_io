@@ -1,11 +1,11 @@
-package iomaster
+package iojob
 
 import (
-	queueio "iomaster/pkg/queue_io"
+	ioque "iomaster/src/io_queue"
 )
 
 type WriteJob struct {
-	queues map[string]*queueio.WriterQueue
+	queues map[string]*ioque.WriterQueue
 	Batch  int
 	C      chan []byte
 }
@@ -21,7 +21,7 @@ func (j *WriteJob) WithBatch(batch int) *WriteJob { j.Batch = batch; return j }
 
 func (j *WriteJob) Queue(queName string) *WriteJob {
 	if _, ok := j.queues[queName]; !ok {
-		j.queues[queName] = queueio.NewWriteQueue()
+		j.queues[queName] = ioque.NewWriteQueue()
 	}
 	return j
 }
