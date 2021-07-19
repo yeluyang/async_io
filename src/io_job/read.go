@@ -8,6 +8,7 @@ import (
 type ReadJob struct {
 	queues map[string]*ioque.ReaderQueue
 	size   int
+	ch     chan []byte
 	exit   chan struct{}
 }
 
@@ -20,11 +21,12 @@ func NewAsyncReadJob() *ReadJob {
 
 func (j *ReadJob) WithSize(size int) *ReadJob { j.size = size; return j }
 
-func (j *ReadJob) Queue(queName string, reader ...*asyncio.AsyncReader) *ReadJob {
-	if _, ok := j.queues[queName]; !ok {
-		j.queues[queName] = ioque.NewReadQueue()
+func (j *ReadJob) Add(key string, reader ...*asyncio.AsyncReader) *ReadJob {
+	if _, ok := j.queues[key]; !ok {
+		j.queues[key] = ioque.NewReadQueue().Add(reader...)
+	} else {
+		j.queues[key].Add(reader...)
 	}
-	j.queues[queName].Queue(reader...)
 	return j
 }
 
@@ -52,41 +54,39 @@ func (j *ReadJob) BatchCH(batch int) chan [][]byte {
 }
 
 func (j *ReadJob) CH() chan []byte {
+	j.runAllQueue()
 	ch := make(chan []byte, 1)
 	go func() {
 		defer close(ch)
 		remain := j.size
-		for {
-			for i := range j.queues {
-				func(q *ioque.ReaderQueue) {
-					go q.Run()
-					defer q.Close()
-					for {
-						select {
-						case <-j.exit:
-							return
-						case data, open := <-q.C:
-							if !open {
-								return
-							}
-							ch <- data
-							if j.size > 0 {
-								remain--
-								if remain <= 0 {
-									return
-								}
-							}
-						}
-					}
-				}(j.queues[i])
-				if j.size > 0 && remain <= 0 {
+		for b := range j.ch {
+			ch <- b
+			if j.size > 0 {
+				remain--
+				if remain <= 0 {
 					return
 				}
-			}
-			if remain <= 0 {
-				return
 			}
 		}
 	}()
 	return ch
+}
+
+func (j *ReadJob) runAllQueue() {
+	for i := range j.queues {
+		go func(q *ioque.ReaderQueue) {
+			go q.Run()
+			for {
+				select {
+				case <-j.exit:
+					return
+				case b, ok := <-q.C:
+					if !ok {
+						return
+					}
+					j.ch <- b
+				}
+			}
+		}(j.queues[i])
+	}
 }
