@@ -1,7 +1,11 @@
-package asyncio
+package queueio
+
+import (
+	asyncio "iomaster/async_io"
+)
 
 type ReadQueue struct {
-	rdrs [][]*AsyncReader
+	rdrs [][]*asyncio.AsyncReader
 	exit chan struct{}
 	C    chan []byte
 }
@@ -12,7 +16,7 @@ func NewReadQueue() *ReadQueue {
 	}
 }
 
-func (q *ReadQueue) Queue(reader ...*AsyncReader) *ReadQueue {
+func (q *ReadQueue) Queue(reader ...*asyncio.AsyncReader) *ReadQueue {
 	q.rdrs = append(q.rdrs, reader)
 	return q
 }
@@ -29,7 +33,7 @@ func (q *ReadQueue) Close() {
 func (q *ReadQueue) Run() {
 	defer close(q.C)
 	for i := range q.rdrs {
-		go func(rq []*AsyncReader) {
+		go func(rq []*asyncio.AsyncReader) {
 			for i := range rq {
 				go rq[i].Run()
 				defer rq[i].Close()

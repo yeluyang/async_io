@@ -1,4 +1,4 @@
-module github.com/yeluyang/asyncio-go
+module iomaster
 
 go 1.14
 

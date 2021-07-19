@@ -1,7 +1,8 @@
-package asyncio
+package queueio
 
 import (
 	"fmt"
+	asyncio "iomaster/async_io"
 )
 
 type WriteQueue struct {
@@ -9,19 +10,19 @@ type WriteQueue struct {
 
 	C chan [][]byte
 
-	writerBuilder func() *AsyncWriter
+	writerBuilder func() *asyncio.AsyncWriter
 }
 
 func NewWriteQueue() *WriteQueue {
 	return &WriteQueue{
 		PartSize: 0,
 
-		C: make(chan [][]byte, DefaultCHBuffer),
+		C: make(chan [][]byte, asyncio.DefaultCHBuffer),
 	}
 }
 
 func (q *WriteQueue) WithPartitionSize(size int) *WriteQueue { q.PartSize = size; return q }
-func (q *WriteQueue) WithWriterBuilder(builder func() *AsyncWriter) *WriteQueue {
+func (q *WriteQueue) WithWriterBuilder(builder func() *asyncio.AsyncWriter) *WriteQueue {
 	q.writerBuilder = builder
 	return q
 }
