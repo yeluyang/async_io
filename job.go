@@ -1,7 +1,7 @@
 package asyncio
 
 type AsyncReadJob struct {
-	queues []*ReadQueue
+	queues map[string]*ReadQueue
 	size   int
 	exit   chan struct{}
 }
@@ -15,20 +15,24 @@ func NewAsyncReadJob() *AsyncReadJob {
 
 func (j *AsyncReadJob) WithSize(size int) *AsyncReadJob { j.size = size; return j }
 
-func (j *AsyncReadJob) Add(q ...*ReadQueue) {
-	j.queues = append(j.queues, q...)
+func (j *AsyncReadJob) Queue(queName string, reader ...*AsyncReader) *AsyncReadJob {
+	if _, ok := j.queues[queName]; !ok {
+		j.queues[queName] = NewReadQueue()
+	}
+	j.queues[queName].Queue(reader...)
+	return j
 }
 
 func (j *AsyncReadJob) Close() {
 	close(j.exit)
 }
 
-func (j *AsyncReadJob) BatchReader(batch int) chan [][]byte {
+func (j *AsyncReadJob) BatchCH(batch int) chan [][]byte {
 	ch := make(chan [][]byte, 1)
 	go func() {
 		defer close(ch)
 		buffer := make([][]byte, 0, batch)
-		for data := range j.Reader() {
+		for data := range j.CH() {
 			buffer = append(buffer, data)
 			if len(buffer) >= batch {
 				ch <- buffer
@@ -42,7 +46,7 @@ func (j *AsyncReadJob) BatchReader(batch int) chan [][]byte {
 	return ch
 }
 
-func (j *AsyncReadJob) Reader() chan []byte {
+func (j *AsyncReadJob) CH() chan []byte {
 	ch := make(chan []byte, 1)
 	go func() {
 		defer close(ch)
@@ -83,58 +87,53 @@ func (j *AsyncReadJob) Reader() chan []byte {
 }
 
 type AsyncWriteJob struct {
-	path      string
-	delimiter byte
-	size      int
-	exit      chan struct{}
+	queues map[string]*WriteQueue
+	Batch  int
+	C      chan []byte
 }
 
-func NewAsyncWriteJob(path string) *AsyncWriteJob {
+func NewAsyncWriteJob() *AsyncWriteJob {
 	return &AsyncWriteJob{
-		path:      path,
-		delimiter: DefaultDelimiter,
-		size:      1024,
-		exit:      make(chan struct{}),
+		Batch: 1,
+		C:     make(chan []byte),
 	}
 }
-func (j *AsyncWriteJob) WithDelimiter(delim byte) *AsyncWriteJob { j.delimiter = delim; return j }
-func (j *AsyncWriteJob) WithItemSize(size int) *AsyncWriteJob    { j.size = size; return j }
 
-func (j *AsyncWriteJob) BatchWrite(batch int, ch chan []byte) {
-	buffer := make([]byte, batch*j.size)
-	counter := 0
+func (j *AsyncWriteJob) WithBatch(batch int) *AsyncWriteJob { j.Batch = batch; return j }
 
-	put := make(chan []byte, 1)
-	inner := newAsyncIO(j.path, false)
-	defer inner.close()
-	inner.runWriter(put)
+func (j *AsyncWriteJob) Queue(queName string) *AsyncWriteJob {
+	if _, ok := j.queues[queName]; !ok {
+		j.queues[queName] = NewWriteQueue()
+	}
+	return j
+}
 
-	for {
-		select {
-		case <-j.exit:
-			goto EXIT
-		case data, open := <-ch:
-			if open {
-				counter++
-				copy(buffer[len(buffer):], data)
-				buffer = append(buffer, j.delimiter)
-				if counter >= batch {
-					put <- buffer
-					counter = 0
-					buffer = make([]byte, batch*j.size)
-				}
-			} else {
-				goto EXIT
-			}
+func (j *AsyncWriteJob) Run() {
+	buffer := make([][]byte, 0, j.Batch)
+
+	for _, q := range j.queues {
+		go q.Run()
+		defer q.Close()
+	}
+
+	for data := range j.C {
+		buffer = append(buffer, data)
+		if len(buffer) >= j.Batch {
+			j.broadCast(buffer)
+			buffer = make([][]byte, 0, j.Batch)
 		}
 	}
-
-EXIT:
 	if len(buffer) > 0 {
-		put <- buffer
+		j.broadCast(buffer)
+	}
+}
+
+func (j *AsyncWriteJob) broadCast(b [][]byte) {
+	for i := range j.queues {
+		j.queues[i].C <- b
 	}
 }
 
 func (j *AsyncWriteJob) Close() {
-	close(j.exit)
+	close(j.C)
 }
