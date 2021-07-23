@@ -39,6 +39,7 @@ func (r *AsyncReader) WithName(name string) *AsyncReader {
 func (r *AsyncReader) WithDelimiter(delimiter byte) *AsyncReader { r.Delimiter = delimiter; return r }
 
 func (r *AsyncReader) Close() {
+	r.log.Debugf("reader exiting")
 	close(r.exit)
 	for range r.C {
 	}
@@ -60,7 +61,8 @@ func (r *AsyncReader) Run() {
 					r.log.Fatalf("failed to read from %s: %s", r.Name, err)
 				}
 			} else {
-				r.log.Tracef("read data={len=%d, offset=%d} from %s", len(data), counter, r.Name)
+				r.log.Debugf("read data={len=%d, offset=%d} from %s", len(data), counter, r.Name)
+				// r.log.Tracef("read data: %v", string(data))
 				counter++
 				r.C <- data[:len(data)-1] // remove `delimiter` at the end of bytes
 			}

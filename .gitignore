@@ -1,0 +1,5 @@
+tmp/
+
+# ignore files generate from vscode
+.vscode/
+debug.test

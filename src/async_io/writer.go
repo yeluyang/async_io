@@ -69,7 +69,8 @@ func (w *AsyncWriter) write(b []byte) (int, error) {
 	} else if n != len(b) {
 		return n, fmt.Errorf("incompelete payload, bytes written(%d/%d)", n, len(b))
 	} else {
-		w.log.Tracef("wrote %d bytes payload", n)
+		w.log.Debugf("wrote %d bytes payload", n)
+		// w.log.Tracef("wrote payload: %v", string(b))
 		if dn, err := w.inner.Write(w.Delimiter); err != nil {
 			return n + dn, fmt.Errorf("failed to write delimiter: %s", err)
 		} else if dn != len(w.Delimiter) {
